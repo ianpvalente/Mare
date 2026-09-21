@@ -1,0 +1,70 @@
+name: Gerar apps do Maré
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            nome: Mare-Windows.zip
+          - os: macos-latest
+            nome: Mare-Mac.zip
+          - os: ubuntu-latest
+            nome: Mare-Linux.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependências
+        run: pip install customtkinter pyinstaller pillow
+
+      - name: Montar app (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --noconfirm --onefile --windowed --name Mare --icon mare.ico --add-data "mare.ico;." --collect-data customtkinter mare.pyw
+          Compress-Archive -Path dist/Mare.exe -DestinationPath ${{ matrix.nome }}
+
+      - name: Montar app (Mac)
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --noconfirm --windowed --name Mare --icon mare.png --osx-bundle-identifier com.mare.agenda --collect-data customtkinter mare.pyw
+          ditto -c -k --keepParent dist/Mare.app ${{ matrix.nome }}
+
+      - name: Montar app (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          pyinstaller --noconfirm --onefile --windowed --name Mare --collect-data customtkinter mare.pyw
+          cd dist && zip ../${{ matrix.nome }} Mare
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.nome }}
+          path: ${{ matrix.nome }}
+
+  publicar:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Atualizar página de download
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest Mare-Windows.zip Mare-Mac.zip Mare-Linux.zip \
+            --title "Maré — download" \
+            --notes "Baixe o arquivo do seu sistema, descompacte e abra. Instruções completas na página inicial do projeto."
